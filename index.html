@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Limpeza Cloud</title>
+    <style>
+        :root { --primary: #007bff; --success: #28a745; --warning: #ffc107; --danger: #dc3545; --dark: #343a40; }
+        body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 0; padding: 20px; }
+        .container { max-width: 600px; margin: auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+        h2 { text-align: center; color: var(--dark); }
+        .secao { display: none; }
+        .ativa { display: block; }
+        input, select, button { width: 100%; padding: 12px; margin: 8px 0; border-radius: 6px; border: 1px solid #ddd; box-sizing: border-box; }
+        button { cursor: pointer; border: none; font-weight: bold; transition: 0.3s; }
+        .btn-main { background: var(--primary); color: white; }
+        .btn-sair { background: #6c757d; color: white; margin-top: 10px; }
+        .btn-danger { background: var(--danger); color: white; }
+        .btn-export { background: #17a2b8; color: white; }
+        .aba-container { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 10px; margin-bottom: 15px; }
+        .aba { padding: 10px 20px; background: #e9ecef; border-radius: 20px; cursor: pointer; white-space: nowrap; font-size: 14px; }
+        .aba.ativa { background: var(--primary); color: white; }
+        .card { background: #fff; border-left: 5px solid var(--primary); padding: 15px; margin-bottom: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; }
+        .card.concluido { border-left-color: var(--success); opacity: 0.8; }
+        .card.em-andamento { border-left-color: var(--warning); }
+        .badge-tempo { font-size: 11px; padding: 3px 8px; border-radius: 10px; background: #eee; color: #555; display: inline-block; margin-top: 5px; }
+        .status-tag { font-size: 10px; text-transform: uppercase; font-weight: bold; }
+        #loader { text-align: center; font-size: 12px; color: #666; display: none; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div id="loader">🔄 Sincronizando com a nuvem...</div>
+
+    <div id="tela-login" class="secao ativa">
+        <h2>🔑 Acesso ao Sistema</h2>
+        <select id="select-user">
+            <option value="admin">Administrador</option>
+            <option value="Ana">Ana</option>
+            <option value="Bruno">Bruno</option>
+            <option value="Carlos">Carlos</option>
+        </select>
+        <input type="password" id="senha" placeholder="Senha (padrão: 123)">
+        <button class="btn-main" onclick="fazerLogin()">Entrar</button>
+    </div>
+
+    <div id="painel-admin" class="secao">
+        <h2>⚙️ Painel Admin</h2>
+        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #eee;">
+            <select id="adm-andar">
+                <option value="Térreo">Térreo</option>
+                <option value="1º Andar">1º Andar</option>
+                <option value="2º Andar">2º Andar</option>
+                <option value="3º Andar">3º Andar</option>
+                <option value="Copa/Refeitório">Copa/Refeitório</option>
+            </select>
+            <input type="text" id="adm-tarefa" placeholder="Ex: Limpeza de Vidros">
+            <select id="adm-dia">
+                <option>Segunda</option><option>Terça</option><option>Quarta</option>
+                <option>Quinta</option><option>Sexta</option><option>Sábado</option><option>Domingo</option>
+            </select>
+            <select id="adm-func">
+                <option value="Ana">Ana</option><option value="Bruno">Bruno</option><option value="Carlos">Carlos</option>
+            </select>
+            <button class="btn-main" onclick="adicionarTarefa()" style="background: var(--success);">Adicionar na Escala</button>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
+            <button class="btn-export" onclick="exportarExcel()">📊 Ver Planilha</button>
+            <button class="btn-danger" onclick="limparSemana()">🔄 Resetar Tudo</button>
+        </div>
+        <div id="lista-geral"></div>
+        <button class="btn-sair" onclick="logout()">Sair</button>
+    </div>
+
+    <div id="painel-func" class="secao">
+        <h2 id="boas-vindas"></h2>
+        <div class="aba-container" id="abas-dias"></div>
+        <div id="minhas-tarefas"></div>
+        <button class="btn-sair" onclick="logout()">Sair</button>
+    </div>
+</div>
+
+<script>
+    // --- CONFIGURAÇÃO ---
+    const URL_API = "https://script.google.com/macros/s/AKfycbx2vq5bAu_NMAcb7uDozfozR6b0MV3aMvFMJ3H728kchoKlR5gb6n4tsdiMoGo6YsH7HQ/exec"; 
+
+    let tarefas = [];
+    let usuarioLogado = "";
+    let diaSelecionado = "Segunda";
+    const dias = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"];
+
+    // Sincronização
+    async function carregarDados() {
+        document.getElementById('loader').style.display = 'block';
+        try {
+            const response = await fetch(URL_API);
+            tarefas = await response.json();
+            if (usuarioLogado === 'admin') renderizarAdmin();
+            else if (usuarioLogado) renderizarFunc();
+        } catch (e) {
+            console.error("Erro ao ler dados:", e);
+        }
+        document.getElementById('loader').style.display = 'none';
+    }
+
+    async function salvar(acao = "save") {
+        document.getElementById('loader').style.display = 'block';
+        const payload = acao === "clear" ? { action: "clear" } : { tarefas: tarefas };
+        
+        try {
+            await fetch(URL_API, {
+                method: 'POST',
+                mode: 'no-cors', // Importante para Google Apps Script
+                body: JSON.stringify(payload)
+            });
+            // Pequeno delay para o Google processar antes de recarregar
+            setTimeout(carregarDados, 1500);
+        } catch (e) {
+            console.error("Erro ao salvar:", e);
+        }
+    }
+
+    function fazerLogin() {
+        const pass = document.getElementById('senha').value;
+        if (pass === "123") {
+            usuarioLogado = document.getElementById('select-user').value;
+            document.getElementById('tela-login').classList.remove('ativa');
+            carregarDados();
+            if (usuarioLogado === 'admin') {
+                document.getElementById('painel-admin').classList.add('ativa');
+            } else {
+                document.getElementById('painel-func').classList.add('ativa');
+                document.getElementById('boas-vindas').innerText = `Olá, ${usuarioLogado} 👋`;
+                setDia(diaSelecionado);
+            }
+        } else { alert("Senha incorreta!"); }
+    }
+
+    async function adicionarTarefa() {
+        const andar = document.getElementById('adm-andar').value;
+        const tarefaTxt = document.getElementById('adm-tarefa').value;
+        if (!tarefaTxt) return alert("Descreva a tarefa!");
+
+        const nova = {
+            id: Date.now(),
+            dia: document.getElementById('adm-dia').value,
+            andar: andar,
+            tarefa: tarefaTxt,
+            usuario: document.getElementById('adm-func').value,
+            status: "Pendente",
+            inicio: "", fim: "", duracao: "", inicioRaw: ""
+        };
+
+        tarefas.push(nova);
+        renderizarAdmin();
+        await salvar();
+        document.getElementById('adm-tarefa').value = "";
+    }
+
+    async function acaoTarefa(id, tipo) {
+    // 1. Encontra a tarefa localmente
+    const t = tarefas.find(x => x.id == id);
+    const agora = new Date();
+    const horaFormatada = agora.getHours().toString().padStart(2, '0') + ":" + 
+                          agora.getMinutes().toString().padStart(2, '0');
+
+    if (tipo === 'start') {
+        t.inicio = horaFormatada;
+        t.inicioRaw = agora.getTime();
+        t.status = "Em andamento";
+    } else {
+        t.fim = horaFormatada;
+        t.duracao = Math.floor((agora.getTime() - t.inicioRaw) / 60000);
+        t.status = "Concluído";
+    }
+
+    // 2. Atualiza a tela IMEDIATAMENTE
+    renderizarFunc(); 
+
+    // 3. Envia para o Google em segundo plano
+    salvar(); 
+}
+
+    function renderizarAdmin() {
+        const lista = document.getElementById('lista-geral');
+        lista.innerHTML = "<h4>Escala Atual</h4>";
+        tarefas.forEach(t => {
+            const statusCor = t.status === 'Concluído' ? 'var(--success)' : (t.inicio ? 'var(--warning)' : '#666');
+            lista.innerHTML += `
+                <div class="card ${t.status === 'Concluído' ? 'concluido' : (t.inicio ? 'em-andamento' : '')}">
+                    <div style="flex-grow: 1;">
+                        <small><strong>${t.dia}</strong> - ${t.usuario}</small>
+                        <div><strong>${t.andar}</strong>: ${t.tarefa}</div>
+                        <div class="status-tag" style="color: ${statusCor}">${t.status}</div>
+                        <div class="badge-tempo">${t.status === 'Concluído' ? '⏱️ '+t.duracao+' min' : (t.inicio ? '⏳ Iniciado às '+t.inicio : '📅 Aguardando')}</div>
+                    </div>
+                    <button onclick="removerTarefa(${t.id})" style="width:auto; background:none; font-size:18px">🗑️</button>
+                </div>`;
+        });
+    }
+
+    function renderizarFunc() {
+        const abas = document.getElementById('abas-dias');
+        abas.innerHTML = dias.map(d => `<div class="aba ${d === diaSelecionado ? 'ativa' : ''}" onclick="setDia('${d}')">${d}</div>`).join('');
+        const lista = document.getElementById('minhas-tarefas');
+        const filtradas = tarefas.filter(t => t.usuario === usuarioLogado && t.dia === diaSelecionado);
+        lista.innerHTML = filtradas.length ? "" : "<p>Nenhuma tarefa para hoje.</p>";
+        filtradas.forEach(t => {
+            let acao = t.status === "Concluído" ? `<span style="color:green">✅ ${t.duracao} min</span>` :
+                       !t.inicio ? `<button onclick="acaoTarefa(${t.id}, 'start')" style="background:var(--warning); width:auto">⏱️ Iniciar</button>` :
+                       `<button onclick="acaoTarefa(${t.id}, 'stop')" style="background:var(--success); color:white; width:auto">✅ Finalizar</button>`;
+            lista.innerHTML += `<div class="card ${t.status === 'Concluído' ? 'concluido' : ''}">
+                <div><strong>${t.andar}</strong><br><small>${t.tarefa}</small></div>
+                <div>${acao}</div>
+            </div>`;
+        });
+    }
+
+    async function removerTarefa(id) {
+        if(confirm("Excluir tarefa?")) {
+            tarefas = tarefas.filter(t => t.id != id);
+            renderizarAdmin();
+            await salvar();
+        }
+    }
+
+    async function limparSemana() {
+        if(confirm("Isso apagará todos os dados da planilha. Confirma?")) {
+            tarefas = [];
+            renderizarAdmin();
+            await salvar("clear");
+        }
+    }
+
+    function exportarExcel() {
+        // Abre a planilha do Google Sheets vinculada
+        window.open(URL_API.replace("/exec", "/view"), "_blank");
+    }
+
+    function setDia(d) { diaSelecionado = d; renderizarFunc(); }
+    function logout() { location.reload(); }
+
+    // Auto-refresh a cada 30 segundos
+    setInterval(() => { if(usuarioLogado) carregarDados(); }, 30000);
+</script>
+</body>
+</html>
